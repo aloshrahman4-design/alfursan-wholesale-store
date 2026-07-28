@@ -115,7 +115,7 @@ header::after{ /* حافة أقواس - توقيع التصميم */
 }
 .card:hover{transform:translateY(-4px);box-shadow:0 16px 40px rgba(92,26,51,.16)}
 .media{
-  position:relative;aspect-ratio:4/3;background:#F1E3E9;
+  position:relative;aspect-ratio:1/1;background:#F1E3E9;
   overflow:hidden;
 }
 .media img,.media video{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
@@ -521,7 +521,7 @@ function render(){
       </div>
       <div class="body">
         <span class="cat">${esc(p.category)}</span>
-        <h3 class="name">${esc(p.name)}</h3>
+        <h3 class="name" hidden>${esc(p.name)}</h3>
         ${p.description ? `<p class="desc">${esc(p.description)}</p>` : ""}
         <p class="hint-price">💰 السعر والمقاسات موضحة داخل الصورة</p>
         <div class="actions">
