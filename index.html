@@ -284,8 +284,27 @@ footer b{color:var(--plum)}
   .btn{font-size:.78rem;padding:9px 6px}
 }
 </style>
+
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '4343868569208794');
+fbq('track', 'PageView');
+</script>
+<!-- End Meta Pixel Code -->
+
 </head>
 <body>
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id=4343868569208794&ev=PageView&noscript=1"
+/></noscript>
 
 <header>
   <div class="header-row">
@@ -589,6 +608,16 @@ function addToCart(id){
   CART[id] = (CART[id]||0) + 1;
   saveCart(); updateCartUI();
   toast("انضاف للسلة ✓");
+  const p = PRODUCTS.find(x=>x.id===id);
+  if(typeof fbq === "function" && p){
+    fbq('track', 'AddToCart', {
+      content_name: p.name,
+      content_ids: [id],
+      content_type: 'product',
+      value: p.price || 0,
+      currency: 'IQD'
+    });
+  }
 }
 function changeQty(id, d){
   CART[id] = (CART[id]||0) + d;
@@ -650,18 +679,39 @@ function orderSingle(id){
   if(p.category) msg += `\n  الصنف: ${p.category}`;
   if(p.images[0]) msg += `\n  صورة المنتج: ${p.images[0]}`;
   msg += `\n\nممكن التفاصيل والسعر؟`;
+  if(typeof fbq === "function"){
+    fbq('track', 'InitiateCheckout', {
+      content_name: p.name,
+      content_ids: [id],
+      content_type: 'product',
+      value: p.price || 0,
+      currency: 'IQD',
+      num_items: 1
+    });
+  }
   window.open(waLink(msg), "_blank");
 }
 function checkout(){
   const ids = Object.keys(CART); if(!ids.length) return;
   let msg = `السلام عليكم\nأريد أطلب من ${STORE_NAME}:\n`;
+  let total = 0;
   ids.forEach((id,i) => {
     const p = PRODUCTS.find(x=>x.id===id); if(!p) return;
     const qty = CART[id];
     msg += `\n${i+1}. ${p.name} × ${qty}`;
     if(p.images[0]) msg += `\n   صورة: ${p.images[0]}`;
+    total += (p.price||0) * qty;
   });
   msg += `\n\nشكراً`;
+  if(typeof fbq === "function"){
+    fbq('track', 'InitiateCheckout', {
+      content_ids: ids,
+      content_type: 'product',
+      value: total,
+      currency: 'IQD',
+      num_items: ids.reduce((a,id)=>a+CART[id],0)
+    });
+  }
   window.open(waLink(msg), "_blank");
 }
 
