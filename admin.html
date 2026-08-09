@@ -109,7 +109,26 @@ header::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:22p
 .rcard .info{padding:8px 10px}
 .rcard .n{font-size:.8rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rcard .p{font-size:.78rem;color:var(--plum);font-weight:700}
+.rcard-actions{display:flex;gap:6px;margin-top:8px}
+.rcard-actions button{
+  flex:1;border:1.5px solid #E8DCC0;background:#fff;color:var(--plum);
+  border-radius:8px;padding:6px 4px;font-family:inherit;font-size:.72rem;font-weight:700;cursor:pointer;
+}
+.rcard-actions button.danger{color:var(--err);border-color:#F0D3D0}
 .muted-note{color:var(--muted);font-size:.85rem;text-align:center;padding:20px}
+
+/* ===== نافذة التعديل ===== */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(43,27,34,.5);z-index:90;
+  display:none;align-items:center;justify-content:center;padding:20px;
+}
+.modal-overlay.open{display:flex}
+.modal-box{background:#fff;border-radius:20px;padding:24px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal-box h2{font-size:1.1rem;margin-bottom:16px}
+.modal-actions{display:flex;gap:10px;margin-top:6px}
+.modal-actions button{flex:1;border:none;border-radius:12px;padding:12px;font-family:inherit;font-weight:700;cursor:pointer}
+.modal-actions .save{background:var(--plum);color:#fff}
+.modal-actions .cancel{background:#F0E6D0;color:var(--ink)}
 </style>
 </head>
 <body>
@@ -187,10 +206,37 @@ header::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:22p
 
 </div>
 
+<div class="modal-overlay" id="editModal">
+  <div class="modal-box">
+    <h2>✏️ تعديل المنتج</h2>
+    <form id="editForm">
+      <input type="hidden" id="editId">
+      <div class="field">
+        <label>اسم المنتج</label>
+        <input type="text" id="editName">
+      </div>
+      <div class="field">
+        <label>الوصف</label>
+        <textarea id="editDesc"></textarea>
+      </div>
+      <div class="field">
+        <label>الصنف</label>
+        <input type="text" id="editCategory" list="catList">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="cancel" onclick="closeEdit()">إلغاء</button>
+        <button type="submit" class="save" id="editSaveBtn">حفظ</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 /* ═══════════════ إعدادات ═══════════════ */
 const CHECK_PIN_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/checkAdminPin";
 const CLOUD_FUNCTION_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/addWholesaleProduct";
+const UPDATE_PRODUCT_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/updateWholesaleProduct";
+const DELETE_PRODUCT_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/deleteWholesaleProduct";
 const FIREBASE_PROJECT = "alfursan-market";
 const COLLECTION = "wholesale_products";
 const MAX_DIMENSION = 1600; // أقصى بعد للصورة بعد الضغط، يحافظ على الوضوح
@@ -351,7 +397,9 @@ function resetForm(){
 }
 function esc(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-/* ═══════════════ قائمة آخر المنتجات (قراءة فقط) ═══════════════ */
+/* ═══════════════ قائمة آخر المنتجات + تعديل/حذف ═══════════════ */
+let RECENT = [];
+
 async function loadRecent(){
   const box = document.getElementById("recentBox");
   try{
@@ -360,6 +408,7 @@ async function loadRecent(){
     const data = await res.json();
     const docs = (data.documents || []).map(parseDoc)
       .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,12);
+    RECENT = docs;
 
     if(!docs.length){ box.innerHTML = `<div class="muted-note">ماكو منتجات لحد الآن</div>`; return; }
 
@@ -373,6 +422,10 @@ async function loadRecent(){
         <div class="info">
           <div class="n">${esc(p.name)}</div>
           <div class="p">${esc(p.category) || "بدون تصنيف"}</div>
+          <div class="rcard-actions">
+            <button type="button" onclick="openEdit('${esc(p.id)}')">✏️ تعديل</button>
+            <button type="button" class="danger" onclick="deleteProduct('${esc(p.id)}')">🗑 حذف</button>
+          </div>
         </div>
       </div>`).join("") + `</div>`;
   }catch(err){
@@ -387,17 +440,83 @@ function parseDoc(doc){
     if("integerValue" in v) return Number(v.integerValue);
     if("doubleValue" in v) return Number(v.doubleValue);
     if("timestampValue" in v) return new Date(v.timestampValue).getTime();
+    if("arrayValue" in v) return (v.arrayValue.values||[]).map(val);
     return null;
   };
   const clean = s => { if(s==null) return ""; s=String(s).trim(); return (s===""||s==="غير محدد")?"":s; };
+  const imgs = (val(f.images) || []).map(clean).filter(Boolean);
   return {
+    id: doc.name.split("/").pop(),
     name: clean(val(f.name)) || "بدون اسم",
-    price: Number(val(f.price)) || 0,
+    description: clean(val(f.description)),
     category: clean(val(f.category)),
-    image: clean(val(f.image)),
+    image: imgs[0] || "",
     createdAt: val(f.createdAt) || 0,
   };
 }
+
+function openEdit(id){
+  const p = RECENT.find(x => x.id === id); if(!p) return;
+  document.getElementById("editId").value = p.id;
+  document.getElementById("editName").value = p.name;
+  document.getElementById("editDesc").value = p.description;
+  document.getElementById("editCategory").value = p.category;
+  document.getElementById("editModal").classList.add("open");
+}
+function closeEdit(){
+  document.getElementById("editModal").classList.remove("open");
+}
+
+document.getElementById("editForm").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const btn = document.getElementById("editSaveBtn");
+  btn.disabled = true; btn.textContent = "جاري الحفظ...";
+  try{
+    const res = await fetch(UPDATE_PRODUCT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        secret: sessionStorage.getItem("admin_secret") || "",
+        id: document.getElementById("editId").value,
+        name: document.getElementById("editName").value.trim(),
+        description: document.getElementById("editDesc").value.trim(),
+        category: document.getElementById("editCategory").value.trim(),
+      })
+    });
+    const data = await res.json();
+    if(res.ok && data.success){
+      closeEdit();
+      loadRecent();
+    }else{
+      alert("صار خطأ: " + (data.error || "حاول مرة ثانية"));
+    }
+  }catch(err){
+    alert("تعذر الاتصال بالسيرفر");
+  }finally{
+    btn.disabled = false; btn.textContent = "حفظ";
+  }
+});
+
+async function deleteProduct(id){
+  const p = RECENT.find(x => x.id === id);
+  if(!confirm(`متأكد تريد تحذف "${p ? p.name : "هذا المنتج"}"؟ ما يمكن التراجع.`)) return;
+  try{
+    const res = await fetch(DELETE_PRODUCT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: sessionStorage.getItem("admin_secret") || "", id })
+    });
+    const data = await res.json();
+    if(res.ok && data.success){
+      loadRecent();
+    }else{
+      alert("صار خطأ: " + (data.error || "حاول مرة ثانية"));
+    }
+  }catch(err){
+    alert("تعذر الاتصال بالسيرفر");
+  }
+}
+
 loadRecent();
 </script>
 </body>

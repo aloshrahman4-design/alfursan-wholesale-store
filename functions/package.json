@@ -1,6 +1,6 @@
 {
   "name": "alfursan-wholesale-functions",
-  "main": "checkAdminPin.js",
+  "main": "index.js",
   "engines": { "node": "20" },
   "dependencies": {
     "firebase-admin": "^12.0.0",
