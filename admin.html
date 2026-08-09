@@ -189,25 +189,77 @@ header::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:22p
 
 <script>
 /* ═══════════════ إعدادات ═══════════════ */
-const ADMIN_PIN = "8520";                 // ← غيّره لأي رقم تريده (مختلف عن رمز موقع الأزياء)
+const CHECK_PIN_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/checkAdminPin";
 const CLOUD_FUNCTION_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/addWholesaleProduct";
-const SHARED_SECRET = "azyaa-secret-2026-x9f";
 const FIREBASE_PROJECT = "alfursan-market";
 const COLLECTION = "wholesale_products";
 const MAX_DIMENSION = 1600; // أقصى بعد للصورة بعد الضغط، يحافظ على الوضوح
 
-/* ═══════════════ قفل PIN ═══════════════ */
+/* ═══════════════ قفل PIN — يتحقق منه السيرفر (checkAdminPin) ═══════════════ */
 const pinInput = document.getElementById("pinInput");
+const pinBtn = document.querySelector(".gate-box button");
+const gateErr = document.getElementById("gateErr");
 pinInput.addEventListener("keydown", e => { if(e.key === "Enter") checkPin(); });
-if(sessionStorage.getItem("admin_ok") === "1") document.getElementById("gate").style.display = "none";
+if(sessionStorage.getItem("admin_ok") === "1" && sessionStorage.getItem("admin_secret")){
+  document.getElementById("gate").style.display = "none";
+}
+applyLockIfAny();
 
-function checkPin(){
-  if(pinInput.value.trim() === ADMIN_PIN){
-    sessionStorage.setItem("admin_ok","1");
-    document.getElementById("gate").style.display = "none";
-  }else{
-    document.getElementById("gateErr").textContent = "رمز غير صحيح، حاول مرة ثانية";
+function applyLockIfAny(){
+  const until = Number(sessionStorage.getItem("admin_lock_until") || 0);
+  if(until > Date.now()) lockGate(Math.ceil((until - Date.now())/1000));
+}
+
+function lockGate(seconds){
+  const until = Date.now() + seconds*1000;
+  sessionStorage.setItem("admin_lock_until", String(until));
+  pinInput.disabled = true; pinBtn.disabled = true;
+  (function tick(){
+    const left = Math.ceil((until - Date.now())/1000);
+    if(left <= 0){
+      pinInput.disabled = false; pinBtn.disabled = false;
+      gateErr.textContent = "";
+      sessionStorage.removeItem("admin_lock_until");
+      return;
+    }
+    gateErr.textContent = `عدد محاولات كثير — حاول بعد ${Math.floor(left/60)}:${String(left%60).padStart(2,"0")}`;
+    setTimeout(tick, 1000);
+  })();
+}
+
+async function checkPin(){
+  const pin = pinInput.value.trim();
+  if(!pin || pinBtn.disabled) return;
+  pinBtn.disabled = true;
+  gateErr.textContent = "";
+  try{
+    const res = await fetch(CHECK_PIN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin })
+    });
+    const data = await res.json();
+
+    if(res.ok && data.success){
+      sessionStorage.setItem("admin_ok","1");
+      sessionStorage.setItem("admin_secret", data.secret);
+      document.getElementById("gate").style.display = "none";
+      return;
+    }
+
+    if(res.status === 429 || data.error === "locked"){
+      lockGate(data.retryAfter || 300);
+      return;
+    }
+
+    pinBtn.disabled = false;
+    gateErr.textContent = data.attemptsLeft != null
+      ? `رمز غير صحيح — تبقى ${data.attemptsLeft} محاولات`
+      : "رمز غير صحيح، حاول مرة ثانية";
     pinInput.value = ""; pinInput.focus();
+  }catch(err){
+    pinBtn.disabled = false;
+    gateErr.textContent = "تعذر الاتصال بالسيرفر، تأكد من الإنترنت";
   }
 }
 
@@ -262,7 +314,7 @@ document.getElementById("productForm").addEventListener("submit", async e=>{
 
   try{
     const fd = new FormData();
-    fd.append("secret", SHARED_SECRET);
+    fd.append("secret", sessionStorage.getItem("admin_secret") || "");
     fd.append("name", name);
     fd.append("description", document.getElementById("fDesc").value.trim());
     fd.append("category", document.getElementById("fCategory").value.trim() || "منوعات");
