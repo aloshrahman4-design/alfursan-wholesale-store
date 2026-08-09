@@ -70,8 +70,14 @@ header::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:22p
 .uploader input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .uploader .icon{font-size:1.8rem;margin-bottom:6px}
 .uploader p{font-size:.85rem;color:var(--muted)}
-.preview-wrap{margin-top:14px;display:flex;justify-content:center}
-.preview-wrap img{max-width:220px;max-height:280px;border-radius:14px;box-shadow:var(--shadow);object-fit:cover}
+.preview-wrap{margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.preview-item{position:relative}
+.preview-item img{width:100px;height:100px;border-radius:12px;box-shadow:var(--shadow);object-fit:cover;display:block}
+.preview-item button{
+  position:absolute;top:-8px;left:-8px;width:22px;height:22px;border-radius:50%;
+  background:var(--err);color:#fff;border:2px solid #fff;font-size:.85rem;line-height:1;cursor:pointer;padding:0;
+}
+.video-name{margin-top:10px;font-size:.82rem;color:var(--plum);text-align:center}
 
 /* شرائح المقاسات/الألوان */
 .tags-input{
@@ -161,14 +167,21 @@ header::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:22p
     <form id="productForm">
 
       <div class="field">
-        <label>صورة المنتج <span class="hint">(مطلوبة — الصورة الأصلية بأعلى جودة)</span></label>
+        <label>صور المنتج <span class="hint">(تكدر تختار أكثر من صورة — أول صورة تصير الرئيسية)</span></label>
         <div class="uploader" id="uploader">
-          <input type="file" id="imageInput" accept="image/*" capture="environment">
+          <input type="file" id="imageInput" accept="image/*" multiple>
           <div class="icon">📷</div>
-          <p id="uploaderText">اضغط هنا أو اسحب الصورة</p>
+          <p id="uploaderText">اضغط هنا أو اسحب الصور (وحدة أو أكثر)</p>
         </div>
-        <div class="preview-wrap" id="previewWrap" style="display:none">
-          <img id="previewImg" alt="معاينة">
+        <div class="preview-wrap" id="previewWrap" style="display:none"></div>
+      </div>
+
+      <div class="field">
+        <label>فيديو المنتج <span class="hint">(اختياري)</span></label>
+        <div class="uploader" id="videoUploader">
+          <input type="file" id="videoInput" accept="video/*">
+          <div class="icon">🎬</div>
+          <p id="videoUploaderText">اضغط هنا أو اسحب فيديو (اختياري)</p>
         </div>
       </div>
 
@@ -234,7 +247,7 @@ header::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:22p
 <script>
 /* ═══════════════ إعدادات ═══════════════ */
 const CHECK_PIN_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/checkAdminPin";
-const CLOUD_FUNCTION_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/addWholesaleProduct";
+const CLOUD_FUNCTION_URL = "https://addwholesaleproduct-799699952948.europe-west1.run.app";
 const UPDATE_PRODUCT_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/updateWholesaleProduct";
 const DELETE_PRODUCT_URL = "https://europe-west1-alfursan-market.cloudfunctions.net/deleteWholesaleProduct";
 const FIREBASE_PROJECT = "alfursan-market";
@@ -309,39 +322,66 @@ async function checkPin(){
   }
 }
 
-/* ═══════════════ رفع وضغط الصورة ═══════════════ */
-let compressedBlob = null;
+/* ═══════════════ رفع وضغط الصور + الفيديو ═══════════════ */
+let compressedBlobs = [];
+let videoFile = null;
 const uploader = document.getElementById("uploader");
 const imageInput = document.getElementById("imageInput");
+const videoInput = document.getElementById("videoInput");
 
 ["dragover","dragenter"].forEach(ev => uploader.addEventListener(ev, e=>{e.preventDefault(); uploader.classList.add("drag");}));
 ["dragleave","drop"].forEach(ev => uploader.addEventListener(ev, e=>{e.preventDefault(); uploader.classList.remove("drag");}));
 uploader.addEventListener("drop", e=>{
-  if(e.dataTransfer.files[0]){ imageInput.files = e.dataTransfer.files; handleImage(e.dataTransfer.files[0]); }
+  if(e.dataTransfer.files.length) handleImages(e.dataTransfer.files);
 });
-imageInput.addEventListener("change", e=>{ if(e.target.files[0]) handleImage(e.target.files[0]); });
+imageInput.addEventListener("change", e=>{ if(e.target.files.length) handleImages(e.target.files); });
+videoInput.addEventListener("change", e=>{
+  if(e.target.files[0]){
+    videoFile = e.target.files[0];
+    document.getElementById("videoUploaderText").textContent = `✓ ${videoFile.name}`;
+  }
+});
 
-function handleImage(file){
+async function handleImages(fileList){
   document.getElementById("uploaderText").textContent = "جاري التجهيز...";
-  const img = new Image();
-  const reader = new FileReader();
-  reader.onload = e => { img.src = e.target.result; };
-  img.onload = () => {
-    let {width, height} = img;
-    if(width > height && width > MAX_DIMENSION){ height = height*MAX_DIMENSION/width; width = MAX_DIMENSION; }
-    else if(height > MAX_DIMENSION){ width = width*MAX_DIMENSION/height; height = MAX_DIMENSION; }
-    const canvas = document.createElement("canvas");
-    canvas.width = width; canvas.height = height;
-    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-    canvas.toBlob(blob => {
-      compressedBlob = blob;
-      const url = URL.createObjectURL(blob);
-      document.getElementById("previewImg").src = url;
-      document.getElementById("previewWrap").style.display = "flex";
-      document.getElementById("uploaderText").textContent = "اضغط لتغيير الصورة";
-    }, "image/jpeg", 0.88);
-  };
-  reader.readAsDataURL(file);
+  for(const file of fileList){
+    compressedBlobs.push(await compressImage(file));
+  }
+  renderPreviews();
+  document.getElementById("uploaderText").textContent = "اضغط لإضافة صور أكثر";
+}
+
+function compressImage(file){
+  return new Promise(resolve => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = e => { img.src = e.target.result; };
+    img.onload = () => {
+      let {width, height} = img;
+      if(width > height && width > MAX_DIMENSION){ height = height*MAX_DIMENSION/width; width = MAX_DIMENSION; }
+      else if(height > MAX_DIMENSION){ width = width*MAX_DIMENSION/height; height = MAX_DIMENSION; }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => resolve(blob), "image/jpeg", 0.88);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderPreviews(){
+  const wrap = document.getElementById("previewWrap");
+  wrap.style.display = compressedBlobs.length ? "flex" : "none";
+  wrap.innerHTML = compressedBlobs.map((blob,i) => `
+    <div class="preview-item">
+      <img src="${URL.createObjectURL(blob)}" alt="">
+      <button type="button" onclick="removeImage(${i})">×</button>
+    </div>`).join("");
+}
+function removeImage(i){
+  compressedBlobs.splice(i,1);
+  renderPreviews();
+  if(!compressedBlobs.length) document.getElementById("uploaderText").textContent = "اضغط هنا أو اسحب الصور (وحدة أو أكثر)";
 }
 
 /* ═══════════════ إرسال المنتج ═══════════════ */
@@ -351,7 +391,7 @@ document.getElementById("productForm").addEventListener("submit", async e=>{
   const resultBox = document.getElementById("resultBox");
   resultBox.className = "result"; resultBox.textContent = "";
 
-  if(!compressedBlob){ showResult(false,"لازم تضيف صورة المنتج أول"); return; }
+  if(!compressedBlobs.length){ showResult(false,"لازم تضيف صورة وحدة أقل للمنتج"); return; }
   if(!name){ showResult(false,"لازم تكتب اسم المنتج"); return; }
 
   const btn = document.getElementById("submitBtn");
@@ -364,7 +404,8 @@ document.getElementById("productForm").addEventListener("submit", async e=>{
     fd.append("name", name);
     fd.append("description", document.getElementById("fDesc").value.trim());
     fd.append("category", document.getElementById("fCategory").value.trim() || "منوعات");
-    fd.append("file", compressedBlob, "product.jpg");
+    compressedBlobs.forEach((blob,i) => fd.append("images", blob, `product${i}.jpg`));
+    if(videoFile) fd.append("video", videoFile, videoFile.name);
 
     const res = await fetch(CLOUD_FUNCTION_URL, { method:"POST", body: fd });
     const data = await res.json();
@@ -391,9 +432,12 @@ function showResult(ok, html){
 }
 function resetForm(){
   document.getElementById("productForm").reset();
-  compressedBlob = null;
+  compressedBlobs = [];
+  videoFile = null;
+  document.getElementById("previewWrap").innerHTML = "";
   document.getElementById("previewWrap").style.display = "none";
-  document.getElementById("uploaderText").textContent = "اضغط هنا أو اسحب الصورة";
+  document.getElementById("uploaderText").textContent = "اضغط هنا أو اسحب الصور (وحدة أو أكثر)";
+  document.getElementById("videoUploaderText").textContent = "اضغط هنا أو اسحب فيديو (اختياري)";
 }
 function esc(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
