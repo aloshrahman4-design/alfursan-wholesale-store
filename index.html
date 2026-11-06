@@ -431,6 +431,17 @@ async function init(){
   }
 }
 
+async function fetchPageWithRetry(url, attempts = 3){
+  for(let i = 1; i <= attempts; i++){
+    try{
+      const res = await fetch(url);
+      if(res.ok) return await res.json();
+    }catch(e){ /* انقطاع شبكة مؤقت — نعيد المحاولة */ }
+    if(i < attempts) await new Promise(r => setTimeout(r, 400 * i));
+  }
+  return null;
+}
+
 async function fetchAllProducts(){
   // ملاحظة: ما فيه ترتيب حسب createdAt بطلب Firestore REST نفسه (يحتاج composite
   // index)، فترتيب الصفحات اللي ترجع من السيرفر عشوائي نسبياً — لازم نجيب كل
@@ -438,14 +449,19 @@ async function fetchAllProducts(){
   // ممكن "تضيع" وتبقى غير ظاهرة بالموقع رغم وجودها فعلياً بالقاعدة.
   let docs = [], pageToken = "", guard = 0;
   do{
-    const url = API + `?pageSize=300${pageToken ? "&pageToken="+pageToken : ""}`;
-    const res = await fetch(url);
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    const data = await res.json();
+    const url = API + `?pageSize=300${pageToken ? "&pageToken="+encodeURIComponent(pageToken) : ""}`;
+    const data = await fetchPageWithRetry(url);
+    if(!data){
+      // فشلت هذي الصفحة بعد كل المحاولات (مشكلة شبكة مؤقتة غالباً) —
+      // نكمل بالمنتجات اللي وصلتنا لين الحين بدل ما نفشل الصفحة كلها.
+      console.warn("توقفنا عن الصفحات التالية بعد فشل متكرر بصفحة واحدة.");
+      break;
+    }
     docs = docs.concat(data.documents || []);
     pageToken = data.nextPageToken || "";
     guard++;
   }while(pageToken && guard < 100);
+  if(!docs.length) throw new Error("ما وصل ولا منتج");
   return docs.map(parseDoc).sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
 }
 
