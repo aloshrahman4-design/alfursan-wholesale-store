@@ -432,6 +432,10 @@ async function init(){
 }
 
 async function fetchAllProducts(){
+  // ملاحظة: ما فيه ترتيب حسب createdAt بطلب Firestore REST نفسه (يحتاج composite
+  // index)، فترتيب الصفحات اللي ترجع من السيرفر عشوائي نسبياً — لازم نجيب كل
+  // الصفحات (مو وقف عند حد تعسفي) وبعدها نرتب بالجافاسكربت، وإلا منتجات جديدة
+  // ممكن "تضيع" وتبقى غير ظاهرة بالموقع رغم وجودها فعلياً بالقاعدة.
   let docs = [], pageToken = "", guard = 0;
   do{
     const url = API + `?pageSize=300${pageToken ? "&pageToken="+pageToken : ""}`;
@@ -441,7 +445,7 @@ async function fetchAllProducts(){
     docs = docs.concat(data.documents || []);
     pageToken = data.nextPageToken || "";
     guard++;
-  }while(pageToken && guard < 5);
+  }while(pageToken && guard < 100);
   return docs.map(parseDoc).sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
 }
 
