@@ -1,0 +1,31 @@
+name: Delete old wholesale products (one-time cleanup)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_delete:
+        description: 'اكتب DELETE بالضبط حتى ينفذ الحذف الفعلي (أي شي ثاني = وضع تجريبي آمن بدون حذف)'
+        required: true
+        default: 'dry-run'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install firebase-admin
+
+      - name: Run cleanup
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          DRY_RUN: ${{ github.event.inputs.confirm_delete != 'DELETE' && 'true' || 'false' }}
+        run: node scripts/deleteOldProducts.js
