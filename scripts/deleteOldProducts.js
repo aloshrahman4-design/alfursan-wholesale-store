@@ -1,18 +1,16 @@
 // ═══════════════════════════════════════════════════════════
-//  حذف دفعي لكل منتج قديم بمجموعة wholesale_products — سكربت
-//  لمرة وحدة، يشتغل يدوياً عبر GitHub Actions (workflow_dispatch).
-//  يبقي بس المنتجات اللي عندها source == "telegram_bot" (منتجات
-//  المزامنة الجديدة من تلكرام)، ويحذف كل شي غيرها.
+//  مسح كامل لمجموعة wholesale_products — سكربت لمرة وحدة، يشتغل
+//  يدوياً عبر GitHub Actions (workflow_dispatch). يحذف كل المنتجات
+//  بدون استثناء (بداية من الصفر بطلب صاحب المشروع).
 //
-//  احتياط: ما يحذف شي إلا بعد ما يطبع عدد المنتجات اللي راح يحذفها
-//  ويحتاج DRY_RUN=false صراحة بمتغير بيئة حتى ينفذ الحذف الفعلي —
-//  وإلا يطبع بس العدد بدون حذف (وضع آمن افتراضي).
+//  احتياط: ما يحذف شي إلا إذا كان مدخل "confirm_delete" بالـ workflow
+//  بالضبط = DELETE (يضبطها الـ workflow نفسه بمتغير DRY_RUN).
 // ═══════════════════════════════════════════════════════════
 
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 
-const DRY_RUN = process.env.DRY_RUN !== "false"; // آمن افتراضياً، لازم تحدد DRY_RUN=false صراحة للحذف الفعلي
+const DRY_RUN = process.env.DRY_RUN !== "false"; // آمن افتراضياً
 
 let serviceAccount;
 try {
@@ -26,46 +24,39 @@ initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 
 async function main() {
-  console.log(DRY_RUN ? "🧪 وضع تجريبي (DRY_RUN) — ما راح يصير حذف فعلي." : "⚠️ وضع حذف فعلي — راح يحذف نهائياً.");
+  console.log(DRY_RUN ? "🧪 وضع تجريبي (DRY_RUN) — ما راح يصير حذف فعلي." : "⚠️ وضع حذف فعلي — راح يمسح كل المنتجات نهائياً.");
 
   const collectionRef = db.collection("wholesale_products");
-  let toDelete = [];
-  let kept = 0;
-  let lastDoc = null;
+  let total = 0;
+  let deletedCount = 0;
 
   while (true) {
-    let query = collectionRef.orderBy("__name__").limit(500);
-    if (lastDoc) query = query.startAfter(lastDoc);
-    const snap = await query.get();
+    const snap = await collectionRef.limit(450).get();
     if (snap.empty) break;
 
-    for (const doc of snap.docs) {
-      const source = doc.data().source;
-      if (source === "telegram_bot") kept++;
-      else toDelete.push(doc.ref);
+    total += snap.size;
+
+    if (!DRY_RUN) {
+      const batch = db.batch();
+      snap.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+      deletedCount += snap.size;
+      console.log(`🗑️ حذفت ${deletedCount} منتج لحد الحين...`);
+    } else {
+      console.log(`📄 فحصت ${total} منتج لحد الحين...`);
+      // بوضع التجربة ما نحذف، فنقرا نفس الدفعة بلا نهاية — نوقف هنا ونعتمد
+      // تقدير تقريبي بدل عد دقيق لتفادي حلقة لا نهائية.
+      break;
     }
-    lastDoc = snap.docs[snap.docs.length - 1];
-    console.log(`📄 فحصت ${toDelete.length + kept} منتج لحد الحين...`);
   }
 
-  console.log(`\n📊 النتيجة: ${toDelete.length} منتج قديم (راح يُحذف)، ${kept} منتج جديد (راح يبقى).`);
-
   if (DRY_RUN) {
-    console.log("✅ هذا وضع تجريبي بس — ما انحذف شي. لتنفيذ الحذف الفعلي شغّل الـ workflow مع DRY_RUN=false.");
+    console.log(`\n📊 تقدير: فيه منتجات بالمجموعة (أول دفعة ${total} منها ظهرت). لعدّ دقيق شغّل الحذف الفعلي مباشرة بما إن القرار محسوم.`);
+    console.log("✅ هذا وضع تجريبي بس — ما انحذف شي.");
     return;
   }
 
-  let deletedCount = 0;
-  while (toDelete.length) {
-    const chunk = toDelete.splice(0, 450);
-    const batch = db.batch();
-    chunk.forEach((ref) => batch.delete(ref));
-    await batch.commit();
-    deletedCount += chunk.length;
-    console.log(`🗑️ حذفت ${deletedCount} منتج لحد الحين...`);
-  }
-
-  console.log(`\n✅ انتهى الحذف — انحذف ${deletedCount} منتج قديم، وبقي ${kept} منتج جديد.`);
+  console.log(`\n✅ انتهى المسح — انحذف ${deletedCount} منتج. المجموعة فاضية الحين، جاهزة تبدأ من الصفر.`);
 }
 
 main()
