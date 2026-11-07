@@ -447,7 +447,7 @@ async function fetchAllProducts(){
   // index)، فترتيب الصفحات اللي ترجع من السيرفر عشوائي نسبياً — لازم نجيب كل
   // الصفحات (مو وقف عند حد تعسفي) وبعدها نرتب بالجافاسكربت، وإلا منتجات جديدة
   // ممكن "تضيع" وتبقى غير ظاهرة بالموقع رغم وجودها فعلياً بالقاعدة.
-  let docs = [], pageToken = "", guard = 0;
+  let docs = [], pageToken = "", guard = 0, firstPageFailed = false;
   do{
     const url = API + `?pageSize=300${pageToken ? "&pageToken="+encodeURIComponent(pageToken) : ""}`;
     const data = await fetchPageWithRetry(url);
@@ -455,13 +455,17 @@ async function fetchAllProducts(){
       // فشلت هذي الصفحة بعد كل المحاولات (مشكلة شبكة مؤقتة غالباً) —
       // نكمل بالمنتجات اللي وصلتنا لين الحين بدل ما نفشل الصفحة كلها.
       console.warn("توقفنا عن الصفحات التالية بعد فشل متكرر بصفحة واحدة.");
+      if(guard === 0) firstPageFailed = true; // فشل حتى أول اتصال بالسيرفر — هذا خطأ حقيقي
       break;
     }
     docs = docs.concat(data.documents || []);
     pageToken = data.nextPageToken || "";
     guard++;
   }while(pageToken && guard < 100);
-  if(!docs.length) throw new Error("ما وصل ولا منتج");
+  // لا نرمي خطأ لمجرد إن القائمة فاضية — هذا وضع طبيعي لمتجر جديد بلا منتجات
+  // بعد، وما نريد نطلع "صار خطأ" بدل رسالة "ماكو منتجات" الصحيحة. نرمي خطأ
+  // بس إذا فعلاً فشل أول اتصال بالسيرفر نهائياً.
+  if(firstPageFailed) throw new Error("فشل الاتصال بقاعدة البيانات");
   return docs.map(parseDoc).sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
 }
 
