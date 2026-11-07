@@ -72,8 +72,12 @@ async function classifyCategory(imageBuffer) {
       }
     );
     const data = await res.json();
-    const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-    return CATEGORIES.includes(text) ? text : null;
+    if (data.error) throw new Error(data.error.message || "Gemini API error");
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    console.log(`🔎 Gemini رجع: "${rawText.replace(/\n/g, " ")}"`);
+
+    const match = CATEGORIES.find((c) => rawText.includes(c));
+    return match || null;
   } catch (err) {
     console.error("⚠️ فشل تصنيف الصورة بـ Gemini:", err.message);
     return null;
