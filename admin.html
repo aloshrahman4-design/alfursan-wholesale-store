@@ -214,8 +214,9 @@ header::after{content:"";position:absolute;inset-inline:0;bottom:-1px;height:22p
   </div>
 
   <div class="panel">
-    <h2>📦 آخر المنتجات المضافة</h2>
+    <h2>📦 المنتجات (الأحدث أول)</h2>
     <div id="recentBox"><div class="muted-note">جاري التحميل...</div></div>
+    <button type="button" id="loadMoreBtn" class="submit-btn" style="margin-top:14px;display:none" onclick="loadMore()">حمّل المزيد</button>
   </div>
 
 </div>
@@ -471,26 +472,47 @@ function resetForm(){
 }
 function esc(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-/* ═══════════════ قائمة آخر المنتجات + تعديل/حذف ═══════════════ */
+/* ═══════════════ قائمة المنتجات + تعديل/حذف ═══════════════
+   ترتيب حسب createdAt تنازلياً مباشرة من Firestore (orderBy بالـ REST
+   نفسه) — المنتجات صارت بالمئات (مزامنة تلكرام)، فـ "آخر 12 عشوائي
+   بدون ترتيب" ما يكفي ولا يضمن تشوفين المنتج الجديد. مع تحميل المزيد
+   (pageToken) تقدرين تتصفحين الكل لين تلقين الصورة اللي تريدينها. */
 let RECENT = [];
+let NEXT_PAGE_TOKEN = "";
+const PAGE_SIZE = 40;
 
 async function loadRecent(){
+  RECENT = [];
+  NEXT_PAGE_TOKEN = "";
+  document.getElementById("recentBox").innerHTML = `<div class="muted-note">جاري التحميل...</div>`;
+  await fetchProductsPage(true);
+}
+
+async function loadMore(){
+  await fetchProductsPage(false);
+}
+
+async function fetchProductsPage(isFirstPage){
   const box = document.getElementById("recentBox");
+  const loadMoreBtn = document.getElementById("loadMoreBtn");
   try{
-    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${COLLECTION}?pageSize=12`;
+    const orderBy = encodeURIComponent("createdAt desc");
+    let url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${COLLECTION}?pageSize=${PAGE_SIZE}&orderBy=${orderBy}`;
+    if(NEXT_PAGE_TOKEN) url += `&pageToken=${encodeURIComponent(NEXT_PAGE_TOKEN)}`;
+
     const res = await fetch(url);
     const data = await res.json();
-    const docs = (data.documents || []).map(parseDoc)
-      .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,12);
-    RECENT = docs;
+    const docs = (data.documents || []).map(parseDoc);
+    NEXT_PAGE_TOKEN = data.nextPageToken || "";
+    RECENT = RECENT.concat(docs);
 
-    if(!docs.length){ box.innerHTML = `<div class="muted-note">ماكو منتجات لحد الآن</div>`; return; }
+    if(isFirstPage && !docs.length){ box.innerHTML = `<div class="muted-note">ماكو منتجات لحد الآن</div>`; loadMoreBtn.style.display = "none"; return; }
 
     // تعبئة قائمة الأصناف تلقائياً بالفورم
-    const cats = [...new Set(docs.map(d=>d.category).filter(Boolean))];
+    const cats = [...new Set(RECENT.map(d=>d.category).filter(Boolean))];
     document.getElementById("catList").innerHTML = cats.map(c=>`<option value="${esc(c)}">`).join("");
 
-    box.innerHTML = `<div class="recent-grid">` + docs.map(p=>`
+    const cardsHtml = RECENT.map(p=>`
       <div class="rcard">
         <div class="thumb">${p.image ? `<img src="${esc(p.image)}" loading="lazy">` : `<span class="ph">ش</span>`}</div>
         <div class="info">
@@ -501,9 +523,11 @@ async function loadRecent(){
             <button type="button" class="danger" onclick="deleteProduct('${esc(p.id)}')">🗑 حذف</button>
           </div>
         </div>
-      </div>`).join("") + `</div>`;
+      </div>`).join("");
+    box.innerHTML = `<div class="recent-grid">${cardsHtml}</div>`;
+    loadMoreBtn.style.display = NEXT_PAGE_TOKEN ? "flex" : "none";
   }catch(err){
-    box.innerHTML = `<div class="muted-note">ما گدرنا نجيب القائمة، جربي تحدثين الصفحة</div>`;
+    if(isFirstPage) box.innerHTML = `<div class="muted-note">ما گدرنا نجيب القائمة، جربي تحدثين الصفحة</div>`;
   }
 }
 function parseDoc(doc){
